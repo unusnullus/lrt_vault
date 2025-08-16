@@ -1,21 +1,17 @@
 //SPDX-License-Identifier: MIT
-pragma solidity 0.8.21;
+pragma solidity ^0.8.30;
 
-import {
-    Ownable2Step,
-    Ownable
-} from "@openzeppelin/contracts/access/Ownable2Step.sol";
-import { Pausable } from "@openzeppelin/contracts/utils/Pausable.sol";
-import { SafeERC20 } from
-    "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import { IERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import { IERC7540, IERC4626 } from "./interfaces/IERC7540.sol";
-import { PermitParams, AsyncVault } from "./AsyncVault.sol";
-import { ERC20Permit } from
-    "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
-import { Address } from "@openzeppelin/contracts/utils/Address.sol";
+import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {IERC7540, IERC4626} from "./interfaces/IERC7540.sol";
+import {PermitParams, AsyncVault} from "./AsyncVault.sol";
+import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
+import {Address} from "@openzeppelin/contracts/utils/Address.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract VaultZapper is Ownable2Step, Pausable {
+contract VaultZapper is Ownable2Step, Pausable, ReentrancyGuard {
     /**
      * @dev The `SafeERC20` lib is only used for `safeTransfer`,
      * `safeTransferFrom` and `forceApprove` operations.
@@ -37,7 +33,8 @@ contract VaultZapper is Ownable2Step, Pausable {
      * @notice The `authorizedRouters` mapping is used to check if a router is
      * authorized to interact with the `VaultZapper` contract.
      */
-    mapping(address routerAddress => bool isAuthorized) public authorizedRouters;
+    mapping(address routerAddress => bool isAuthorized)
+        public authorizedRouters;
 
     /**
      * @dev The `ZapAndDeposit` event is emitted when a user zaps in and
@@ -99,7 +96,8 @@ contract VaultZapper is Ownable2Step, Pausable {
      * inconsistant.
      */
     error InconsistantSwapData(
-        uint256 expectedTokenInBalance, uint256 actualTokenInBalance
+        uint256 expectedTokenInBalance,
+        uint256 actualTokenInBalance
     );
     /**
      * @dev The `NotEnoughSharesMinted` error is emitted when the amount of
@@ -112,7 +110,8 @@ contract VaultZapper is Ownable2Step, Pausable {
      * underlying assets is not enough.
      */
     error NotEnoughUnderlying(
-        uint256 previewedUnderlying, uint256 withdrawedUnderlying
+        uint256 previewedUnderlying,
+        uint256 withdrawedUnderlying
     );
 
     /**
@@ -146,7 +145,7 @@ contract VaultZapper is Ownable2Step, Pausable {
         _;
     }
 
-    constructor() Ownable(_msgSender()) { }
+    constructor() Ownable(_msgSender()) {}
 
     /**
      * @dev The `withdrawToken` function is used to withdraw tokens from the
@@ -187,11 +186,7 @@ contract VaultZapper is Ownable2Step, Pausable {
     function approveTokenForRouter(
         IERC20 token,
         address router
-    )
-        public
-        onlyOwner
-        onlyAllowedRouter(router)
-    {
+    ) public onlyOwner onlyAllowedRouter(router) {
         token.forceApprove(router, type(uint256).max);
         emit RouterApproved(router, token);
     }
@@ -213,7 +208,8 @@ contract VaultZapper is Ownable2Step, Pausable {
     function toggleVaultAuthorization(IERC7540 vault) public onlyOwner {
         bool authorized = !authorizedVaults[vault];
         IERC20(vault.asset()).forceApprove(
-            address(vault), authorized ? type(uint256).max : 0
+            address(vault),
+            authorized ? type(uint256).max : 0
         );
         authorizedVaults[vault] = authorized;
         emit VaultAuthorized(vault, authorized);
@@ -227,9 +223,7 @@ contract VaultZapper is Ownable2Step, Pausable {
         address router,
         uint256 amount,
         bytes calldata data
-    )
-        internal
-    {
+    ) internal {
         uint256 expectedBalance; // of tokenIn (currently)
 
         if (msg.value == 0) {
@@ -263,9 +257,7 @@ contract VaultZapper is Ownable2Step, Pausable {
         address router,
         IERC20 tokenIn,
         uint256 amount
-    )
-        internal
-    {
+    ) internal {
         tokenIn.safeTransferFrom(_msgSender(), address(this), amount);
         if (tokenIn.allowance(address(this), router) < amount) {
             tokenIn.forceApprove(router, amount);
@@ -296,17 +288,18 @@ contract VaultZapper is Ownable2Step, Pausable {
         whenNotPaused
         returns (uint256)
     {
-        uint256 initialTokenOutBalance =
-            IERC20(vault.asset()).balanceOf(address(this)); // tokenOut balance to
-            // deposit, not final value
+        uint256 initialTokenOutBalance = IERC20(vault.asset()).balanceOf(
+            address(this)
+        ); // tokenOut balance to
+        // deposit, not final value
 
         // Zap
         _zapIn(tokenIn, router, amount, data);
 
         // Deposit
         uint256 shares = vault.deposit(
-            IERC20(vault.asset()).balanceOf(address(this))
-                - initialTokenOutBalance,
+            IERC20(vault.asset()).balanceOf(address(this)) -
+                initialTokenOutBalance,
             _msgSender()
         );
 
@@ -339,17 +332,18 @@ contract VaultZapper is Ownable2Step, Pausable {
         onlyAllowedVault(vault)
         whenNotPaused
     {
-        uint256 initialTokenOutBalance =
-            IERC20(vault.asset()).balanceOf(address(this)); // tokenOut balance to
-            // deposit, not final value
+        uint256 initialTokenOutBalance = IERC20(vault.asset()).balanceOf(
+            address(this)
+        ); // tokenOut balance to
+        // deposit, not final value
 
         // Zap
         _zapIn(tokenIn, router, amountIn, swapData);
 
         // Request deposit
         vault.requestDeposit(
-            IERC20(vault.asset()).balanceOf(address(this))
-                - initialTokenOutBalance,
+            IERC20(vault.asset()).balanceOf(address(this)) -
+                initialTokenOutBalance,
             _msgSender(),
             address(this),
             callback7540Data
@@ -380,10 +374,7 @@ contract VaultZapper is Ownable2Step, Pausable {
         uint256 amount,
         bytes calldata swapData,
         PermitParams calldata permitParams
-    )
-        public
-        returns (uint256)
-    {
+    ) public returns (uint256) {
         if (tokenIn.allowance(_msgSender(), address(this)) < amount) {
             _execPermit(tokenIn, _msgSender(), address(this), permitParams);
         }
@@ -402,14 +393,17 @@ contract VaultZapper is Ownable2Step, Pausable {
         bytes calldata swapData,
         PermitParams calldata permitParams,
         bytes calldata callback7540Data
-    )
-        public
-    {
+    ) public {
         if (tokenIn.allowance(_msgSender(), address(this)) < amount) {
             _execPermit(tokenIn, _msgSender(), address(this), permitParams);
         }
         zapAndRequestDeposit(
-            tokenIn, vault, router, amount, swapData, callback7540Data
+            tokenIn,
+            vault,
+            router,
+            amount,
+            swapData,
+            callback7540Data
         );
     }
 
@@ -419,12 +413,11 @@ contract VaultZapper is Ownable2Step, Pausable {
     function _executeZap(
         address target,
         bytes memory data
-    )
-        internal
-        returns (bytes memory response)
-    {
-        (bool success, bytes memory _data) =
-            target.call{ value: msg.value }(data);
+    ) internal nonReentrant returns (bytes memory response) {
+        // slither-disable-next-line reentrancy-no-eth,reentrancy-eth
+        (bool success, bytes memory _data) = target.call{value: msg.value}(
+            data
+        );
         if (!success) {
             if (data.length > 0) revert SwapFailed(string(_data));
             else revert SwapFailed("Unknown reason");
@@ -440,9 +433,8 @@ contract VaultZapper is Ownable2Step, Pausable {
         address owner,
         address spender,
         PermitParams calldata permitParams
-    )
-        internal
-    {
+    ) internal nonReentrant {
+        // slither-disable-next-line reentrancy-no-eth,reentrancy-eth
         ERC20Permit(address(token)).permit(
             owner,
             spender,

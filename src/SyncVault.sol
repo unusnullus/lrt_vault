@@ -1,26 +1,17 @@
 //SPDX-License-Identifier: MIT
-pragma solidity 0.8.21;
+pragma solidity ^0.8.30;
 
-import { Ownable2StepUpgradeable } from
-    "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
-import {
-    ERC20Upgradeable,
-    IERC20
-} from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
-import { IERC20Metadata } from
-    "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import { ERC20PermitUpgradeable } from
-    "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
-import { ERC20PausableUpgradeable } from
-    "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20PausableUpgradeable.sol";
-import { SafeERC20 } from
-    "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import { Initializable } from
-    "@openzeppelin/contracts/proxy/utils/Initializable.sol";
-import { ERC20Permit } from
-    "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
-import { IERC4626 } from "@openzeppelin/contracts/interfaces/IERC4626.sol";
-import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
+import {Ownable2StepUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
+import {ERC20Upgradeable, IERC20} from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import {ERC20PermitUpgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
+import {ERC20PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20PausableUpgradeable.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
+import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
+import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 
 /*
  * SyncVault inspired by ERC-4626
@@ -30,7 +21,7 @@ import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
  * ########
  * # LIBS #
  * ########
-*/
+ */
 using Math for uint256; // only used for `mulDiv` operations.
 using SafeERC20 for IERC20; // `safeTransfer` and `safeTransferFrom`
 
@@ -48,13 +39,14 @@ abstract contract SyncVault is
     IERC4626,
     Ownable2StepUpgradeable,
     ERC20PermitUpgradeable,
-    ERC20PausableUpgradeable
+    ERC20PausableUpgradeable,
+    ReentrancyGuardUpgradeable
 {
     /*
      * ####################################
      * #  SYNTHETIC RELATED STORAGE #
      * ####################################
-    */
+     */
 
     // @return Amount of the perf fees applied on the positive yield.
     uint16 internal _maxDrawdown; // guardrail
@@ -67,9 +59,11 @@ abstract contract SyncVault is
      * ##########
      * # EVENTS #
      * ##########
-    */
+     */
     event EpochStart(
-        uint256 indexed timestamp, uint256 lastSavedBalance, uint256 totalShares
+        uint256 indexed timestamp,
+        uint256 lastSavedBalance,
+        uint256 totalShares
     );
 
     event EpochEnd(
@@ -91,15 +85,21 @@ abstract contract SyncVault is
     error VaultIsOpen();
     error FeesTooHigh();
     error ERC4626ExceededMaxDeposit(
-        address receiver, uint256 assets, uint256 max
+        address receiver,
+        uint256 assets,
+        uint256 max
     );
     error ERC4626ExceededMaxMint(address receiver, uint256 shares, uint256 max);
-    error ERC4626ExceededMaxWithdraw(address owner, uint256 assets, uint256 max);
+    error ERC4626ExceededMaxWithdraw(
+        address owner,
+        uint256 assets,
+        uint256 max
+    );
     error ERC4626ExceededMaxRedeem(address owner, uint256 shares, uint256 max);
     error VaultIsEmpty(); // We cannot start an epoch with an empty vault
     error MaxDrawdownReached();
     error PermitFailed(); // see
-        // https://dedaub.com/blog/phantom-functions-and-the-billion-dollar-no-op
+    // https://dedaub.com/blog/phantom-functions-and-the-billion-dollar-no-op
 
     /*
      * ##############################
@@ -113,7 +113,7 @@ abstract contract SyncVault is
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
-         _disableInitializers();
+        _disableInitializers();
     }
 
     function initialize(
@@ -122,21 +122,20 @@ abstract contract SyncVault is
         uint256 bootstrapAmount,
         string memory name,
         string memory symbol
-    )
-        public
-        virtual
-        onlyInitializing
-    {
+    ) public virtual onlyInitializing {
+        __ReentrancyGuard_init();
         vaultIsOpen = true;
         _maxDrawdown = 3000; // 30%
         _asset = underlying;
-        _underlyingDecimals =
-            uint8(IERC20Metadata(address(underlying)).decimals());
+        _underlyingDecimals = uint8(
+            IERC20Metadata(address(underlying)).decimals()
+        );
         __ERC20_init(name, symbol);
         __Ownable_init(owner);
         __ERC20Permit_init(name);
         __ERC20Pausable_init();
-        deposit(bootstrapAmount, owner);
+        uint256 _bootstrapShares = deposit(bootstrapAmount, owner);
+        if (_bootstrapShares == 0) revert VaultIsEmpty();
     }
 
     /**
@@ -152,11 +151,7 @@ abstract contract SyncVault is
         uint256 assets,
         address receiver,
         address owner
-    )
-        external
-        whenNotPaused
-        returns (uint256)
-    {
+    ) external whenNotPaused returns (uint256) {
         uint256 maxAssets = maxWithdraw(owner);
         if (assets > maxAssets) {
             revert ERC4626ExceededMaxWithdraw(owner, assets, maxAssets);
@@ -172,7 +167,7 @@ abstract contract SyncVault is
      * #################################
      * # Pausability RELATED FUNCTIONS #
      * #################################
-    */
+     */
     function pause() external onlyOwner {
         _pause();
     }
@@ -185,8 +180,7 @@ abstract contract SyncVault is
      * ######################################
      * #  SYNTHETIC RELATED FUNCTIONS #
      * ######################################
-    */
-
+     */
 
     function setMaxDrawdown(uint16 newMaxDrawdown) external onlyOwner {
         if (newMaxDrawdown > 10_000) revert MaxDrawdownReached();
@@ -194,14 +188,14 @@ abstract contract SyncVault is
     }
 
     function open(uint256 assetReturned) external virtual;
+
     function close() external virtual;
 
     /*
      * #################################
      * #   Permit RELATED FUNCTIONS    #
      * #################################
-    */
-
+     */
 
     /**
      * @dev See {IERC4626-deposit}
@@ -215,11 +209,7 @@ abstract contract SyncVault is
     function deposit(
         uint256 assets,
         address receiver
-    )
-        public
-        whenNotPaused
-        returns (uint256)
-    {
+    ) public whenNotPaused returns (uint256) {
         uint256 maxAssets = maxDeposit(receiver);
         if (assets > maxAssets) {
             revert ERC4626ExceededMaxDeposit(receiver, assets, maxAssets);
@@ -244,11 +234,7 @@ abstract contract SyncVault is
     function mint(
         uint256 shares,
         address receiver
-    )
-        public
-        whenNotPaused
-        returns (uint256)
-    {
+    ) public whenNotPaused returns (uint256) {
         uint256 maxShares = maxMint(receiver);
         if (shares > maxShares) {
             revert ERC4626ExceededMaxMint(receiver, shares, maxShares);
@@ -274,11 +260,7 @@ abstract contract SyncVault is
         uint256 shares,
         address receiver,
         address owner
-    )
-        public
-        whenNotPaused
-        returns (uint256)
-    {
+    ) public whenNotPaused returns (uint256) {
         uint256 maxShares = maxRedeem(owner);
         if (shares > maxShares) {
             revert ERC4626ExceededMaxRedeem(owner, shares, maxShares);
@@ -300,11 +282,7 @@ abstract contract SyncVault is
         return _convertToShares(assets, Math.Rounding.Floor);
     }
 
-    function sharesBalanceInAsset(address owner)
-        public
-        view
-        returns (uint256)
-    {
+    function sharesBalanceInAsset(address owner) public view returns (uint256) {
         return convertToAssets(balanceOf(owner));
     }
 
@@ -314,7 +292,7 @@ abstract contract SyncVault is
     }
 
     /*
-    * @dev The `maxDeposit` function is used to calculate the maximum deposit.
+     * @dev The `maxDeposit` function is used to calculate the maximum deposit.
      * @notice If the vault is locked or paused, users are not allowed to
      * deposit,
      * the maxDeposit is 0.
@@ -341,9 +319,10 @@ abstract contract SyncVault is
      * @return Amount of the maximum number of withdrawable underlying assets.
      */
     function maxWithdraw(address owner) public view returns (uint256) {
-        return vaultIsOpen && !paused()
-            ? _convertToAssets(balanceOf(owner), Math.Rounding.Floor)
-            : 0;
+        return
+            vaultIsOpen && !paused()
+                ? _convertToAssets(balanceOf(owner), Math.Rounding.Floor)
+                : 0;
     }
 
     /**
@@ -403,9 +382,7 @@ abstract contract SyncVault is
         address receiver,
         uint256 assets,
         uint256 shares
-    )
-        internal
-    {
+    ) internal {
         // If _asset is ERC777, transferFrom can trigger a reentrancy BEFORE the
         // transfer happens through the tokensToSend hook. On the other hand,
         // the tokenReceived hook, that is triggered after the transfer,calls
@@ -438,9 +415,7 @@ abstract contract SyncVault is
         address owner,
         uint256 assets,
         uint256 shares
-    )
-        internal
-    {
+    ) internal {
         if (caller != owner) _spendAllowance(owner, caller, shares);
 
         _burn(owner, shares);
@@ -453,11 +428,7 @@ abstract contract SyncVault is
         address from,
         address to,
         uint256 value
-    )
-        internal
-        virtual
-        override(ERC20Upgradeable, ERC20PausableUpgradeable)
-    {
+    ) internal virtual override(ERC20Upgradeable, ERC20PausableUpgradeable) {
         ERC20PausableUpgradeable._update(from, to, value);
     }
 
@@ -465,9 +436,7 @@ abstract contract SyncVault is
         address owner,
         address spender,
         PermitParams calldata permitParams
-    )
-        internal
-    {
+    ) internal nonReentrant {
         ERC20Permit(address(_asset)).permit(
             owner,
             spender,
@@ -493,11 +462,7 @@ abstract contract SyncVault is
     function _convertToShares(
         uint256 assets,
         Math.Rounding rounding
-    )
-        internal
-        view
-        returns (uint256)
-    {
+    ) internal view returns (uint256) {
         return assets.mulDiv(totalSupply() + 1, totalAssets() + 1, rounding);
     }
 
@@ -512,11 +477,7 @@ abstract contract SyncVault is
     function _convertToAssets(
         uint256 shares,
         Math.Rounding rounding
-    )
-        internal
-        view
-        returns (uint256)
-    {
+    ) internal view returns (uint256) {
         return shares.mulDiv(totalAssets() + 1, totalSupply() + 1, rounding);
     }
 

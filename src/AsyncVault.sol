@@ -1,19 +1,13 @@
 //SPDX-License-Identifier: MIT
-pragma solidity 0.8.21;
+pragma solidity ^0.8.30;
 
-import {
-    IERC7540,
-    IERC165,
-    IERC7540Redeem,
-    IERC7540Deposit
-} from "./interfaces/IERC7540.sol";
-import { ERC7540Receiver } from "./interfaces/ERC7540Receiver.sol";
-import { IERC20, SafeERC20, Math, PermitParams } from "./SyncVault.sol";
+import {IERC7540, IERC165, IERC7540Redeem, IERC7540Deposit} from "./interfaces/IERC7540.sol";
+import {ERC7540Receiver} from "./interfaces/ERC7540Receiver.sol";
+import {IERC20, SafeERC20, Math, PermitParams, SyncVault} from "./SyncVault.sol";
 
 uint16 constant MAX_FEES = 3000; // 30%
-uint256 constant YEAR = 24*3600*360;
+uint256 constant YEAR = 24 * 3600 * 360;
 
-import { SyncVault } from "./SyncVault.sol";
 
 /**
  * Asynchronous Vault inspired by ERC-7540
@@ -29,12 +23,12 @@ uint256 constant BPS_DIVIDER = 10_000;
  * ########
  * # LIBS #
  * ########
-*/
+ */
 using Math for uint256; // only used for `mulDiv` operations.
 using SafeERC20 for IERC20; // `safeTransfer` and `safeTransferFrom`
 
 /**
- * @title AsyncVault
+ 
  * @dev This structure contains all the informations needed to let user claim
  * their request after we processed those. To avoid rounding errors we store the
  * totalSupply and totalAssets at the time of the deposit/redeem for the deposit
@@ -42,33 +36,44 @@ using SafeERC20 for IERC20; // `safeTransfer` and `safeTransferFrom`
  * user.
  */
 struct EpochData {
+    /// @notice Total supply snapshot captured for this epoch (used in conversions)
     uint256 totalSupplySnapshot;
+    /// @notice Total assets snapshot captured for this epoch (used in conversions)
     uint256 totalAssetsSnapshot;
+    /// @notice Per-owner pending deposit (assets) recorded in this epoch
     mapping(address => uint256) depositRequestBalance;
+    /// @notice Per-owner pending redeem (shares) recorded in this epoch
     mapping(address => uint256) redeemRequestBalance;
 }
 
 /**
- * @title SettleValues
- * @dev Hold the required values to settle the vault deposit and
- * redeem requests.
+ * @notice Hold the required values to settle the vault deposit and redeem requests.
+ * @dev Used by previewSettle/_settle to communicate intermediate and resulting values.
  */
 struct SettleValues {
+    /// @notice Last saved balance pre-settlement (prior to netting & fee effects)
     uint256 lastSavedBalance;
+    /// @notice Accrued fees according to the first schedule (basis points)
     uint256 fees1;
+    /// @notice Accrued fees according to the second schedule (basis points)
     uint256 fees2;
+    /// @notice Shares queued to be redeemed in the pending silo
     uint256 pendingRedeem;
+    /// @notice Shares to mint to claimable silo as a result of deposits
     uint256 sharesToMint;
+    /// @notice Assets queued to be deposited in the pending silo
     uint256 pendingDeposit;
+    /// @notice Assets to transfer out of pending silo to satisfy redemptions
     uint256 assetsToWithdraw;
+    /// @notice Total assets snapshot used for conversions in this epoch
     uint256 totalAssetsSnapshot;
+    /// @notice Total supply snapshot used for conversions in this epoch
     uint256 totalSupplySnapshot;
 }
 
 /**
- * @title Silo
- * @dev This contract is used to hold the assets/shares of the users that
- * requested a deposit/redeem. It is used to simplify the logic of the vault.
+ * @notice Lightweight holder for pending/claimable balances.
+ * @dev Pre-approves the vault (deployer) for max allowance to simplify transfers.
  */
 contract Silo {
     constructor(IERC20 underlying) {
@@ -76,12 +81,20 @@ contract Silo {
     }
 }
 
+/**
+ * @title AsyncVault
+ * @notice ERC-7540-inspired asynchronous vault built atop a 4626-like base (SyncVault).
+ * @dev Users enqueue deposit and redeem requests while the vault is closed. The owner periodically
+ *      settles requests when opening epochs, minting/burning shares and moving underlying between
+ *      silos according to previewed math. The +1 denominators avoid division-by-zero and dampen
+ *      rounding edge cases when supply or assets are temporarily zero.
+ */
 contract AsyncVault is IERC7540, SyncVault {
     /*
      * ####################################
      * #  SYNTHETIC RELATED STORAGE #
      * ####################################
-    */
+     */
 
     /**
      * @notice The epochId is used to keep track of the deposit and redeem
@@ -114,7 +127,6 @@ contract AsyncVault is IERC7540, SyncVault {
      * The treasury2 can be the owner of the contract or a specific address.
      */
     address public treasury2;
-
 
     uint16 public fees1InBips;
 
@@ -156,7 +168,7 @@ contract AsyncVault is IERC7540, SyncVault {
      * ##########
      * # EVENTS #
      * ##########
-    */
+     */
 
     /**
      * @notice This event is emitted when a user request a deposit.
@@ -235,7 +247,9 @@ contract AsyncVault is IERC7540, SyncVault {
      * @param shares The amount of shares requested by the user.
      */
     error ExceededMaxRedeemRequest(
-        address receiver, uint256 shares, uint256 maxShares
+        address receiver,
+        uint256 shares,
+        uint256 maxShares
     );
 
     /**
@@ -246,7 +260,9 @@ contract AsyncVault is IERC7540, SyncVault {
      * @param maxDeposit The maximum amount of assets the user can request.
      */
     error ExceededMaxDepositRequest(
-        address receiver, uint256 assets, uint256 maxDeposit
+        address receiver,
+        uint256 assets,
+        uint256 maxDeposit
     );
 
     /**
@@ -282,7 +298,7 @@ contract AsyncVault is IERC7540, SyncVault {
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() SyncVault() {
-         _disableInitializers();
+        _disableInitializers();
     }
 
     function initialize(
@@ -295,10 +311,7 @@ contract AsyncVault is IERC7540, SyncVault {
         uint256 bootstrapAmount,
         string memory name,
         string memory symbol
-    )
-        public
-        initializer
-    {
+    ) public initializer {
         super.initialize(owner, underlying, bootstrapAmount, name, symbol);
         epochId = 1;
         setTreasury1(_treasury1);
@@ -315,21 +328,24 @@ contract AsyncVault is IERC7540, SyncVault {
      * request.
      * @param assets The amount of assets requested by the user.
      */
-    function decreaseDepositRequest(uint256 assets)
-        external
-        whenClosed
-        whenNotPaused
-    {
-        address owner = _msgSender();
-        uint256 oldBalance = epochs[epochId].depositRequestBalance[owner];
-        epochs[epochId].depositRequestBalance[owner] -= assets;
-        _asset.safeTransferFrom(address(pendingSilo), owner, assets);
+    /**
+     * @notice Decrease the caller's pending deposit request while the vault is closed.
+     * @param assets Amount of assets to remove from the request and return to the caller.
+     */
+    function decreaseDepositRequest(
+        uint256 assets
+    ) external whenClosed whenNotPaused nonReentrant {
+        address caller = _msgSender();
+        EpochData storage e = epochs[epochId];
+        uint256 oldBalance = e.depositRequestBalance[caller];
+        e.depositRequestBalance[caller] = oldBalance - assets;
+        _asset.safeTransferFrom(address(pendingSilo), caller, assets);
 
         emit DecreaseDepositRequest(
             epochId,
-            owner,
+            caller,
             oldBalance,
-            epochs[epochId].depositRequestBalance[owner]
+            e.depositRequestBalance[caller]
         );
     }
 
@@ -339,21 +355,24 @@ contract AsyncVault is IERC7540, SyncVault {
      * request.
      * @param shares The amount of shares requested by the user.
      */
-    function decreaseRedeemRequest(uint256 shares)
-        external
-        whenClosed
-        whenNotPaused
-    {
-        address owner = _msgSender();
-        uint256 oldBalance = epochs[epochId].redeemRequestBalance[owner];
-        epochs[epochId].redeemRequestBalance[owner] -= shares;
-        _update(address(pendingSilo), owner, shares);
+    /**
+     * @notice Decrease the caller's pending redeem request while the vault is closed.
+     * @param shares Amount of shares to remove from the request and return to the caller.
+     */
+    function decreaseRedeemRequest(
+        uint256 shares
+    ) external whenClosed whenNotPaused nonReentrant {
+        address caller = _msgSender();
+        EpochData storage e = epochs[epochId];
+        uint256 oldBalance = e.redeemRequestBalance[caller];
+        e.redeemRequestBalance[caller] = oldBalance - shares;
+        _update(address(pendingSilo), caller, shares);
 
         emit DecreaseRedeemRequest(
             epochId,
-            owner,
+            caller,
             oldBalance,
-            epochs[epochId].redeemRequestBalance[owner]
+            e.redeemRequestBalance[caller]
         );
     }
 
@@ -361,7 +380,7 @@ contract AsyncVault is IERC7540, SyncVault {
      * ######################################
      * #  SYNTHETIC RELATED FUNCTIONS #
      * ######################################
-    */
+     */
 
     /**
      * @dev The `setTreasury` function is used to set the treasury address.
@@ -389,13 +408,17 @@ contract AsyncVault is IERC7540, SyncVault {
         fees2InBips = _fees2;
     }
 
-
     /**
      * @dev The `close` function is used to close the vault.
      * It can only be called by the owner of the contract (`onlyOwner`
      * modifier).
      */
-    function close() external override onlyOwner {
+    /**
+     * @notice Begin a new epoch by closing the vault.
+     * @dev Transfers current assets to the owner for strategy operations and emits EpochStart.
+     *      Reverts if vault empty to avoid degenerate snapshots.
+     */
+    function close() public override onlyOwner {
         if (!vaultIsOpen) revert VaultIsClosed();
 
         if (totalAssets() == 0) revert VaultIsEmpty();
@@ -417,14 +440,15 @@ contract AsyncVault is IERC7540, SyncVault {
      * @param assetReturned The underlying assets amount to be deposited into
      * the vault.
      */
-    function open(uint256 assetReturned)
-        external
-        override
-        onlyOwner
-        whenNotPaused
-        whenClosed
-    {
-        (uint256 newBalance,) = _settle(assetReturned);
+    /**
+     * @notice End the lock period and finalize the epoch.
+     * @param assetReturned Assets returned by the strategy back to the vault.
+     * @dev Calls _settle to net deposits/redemptions and fees, then re-opens the vault.
+     */
+    function open(
+        uint256 assetReturned
+    ) public override onlyOwner whenNotPaused whenClosed {
+        (uint256 newBalance, ) = _settle(assetReturned);
         vaultIsOpen = true;
         _asset.safeTransferFrom(owner(), address(this), newBalance);
     }
@@ -433,7 +457,7 @@ contract AsyncVault is IERC7540, SyncVault {
      * #################################
      * #   Permit RELATED FUNCTIONS    #
      * #################################
-    */
+     */
 
     /**
      * @dev The `settle` function is used to settle the vault.
@@ -449,14 +473,17 @@ contract AsyncVault is IERC7540, SyncVault {
      * @param newSavedBalance The underlying assets amount to be deposited into
      * the vault.
      */
-    function settle(uint256 newSavedBalance)
-        external
-        onlyOwner
-        whenNotPaused
-        whenClosed
-    {
-        (uint256 _lastSavedBalance, uint256 totalSupply) =
-            _settle(newSavedBalance);
+    /**
+     * @notice Settle an epoch without re-opening immediately (keeps the vault closed).
+     * @param newSavedBalance Assets observable at the end of the epoch (strategy accounting).
+     * @dev Emits EpochStart for the subsequent epoch. Owner-only.
+     */
+    function settle(
+        uint256 newSavedBalance
+    ) public onlyOwner whenNotPaused whenClosed {
+        (uint256 _lastSavedBalance, uint256 totalSupply) = _settle(
+            newSavedBalance
+        );
 
         epochStart = block.timestamp;
         emit EpochStart(block.timestamp, _lastSavedBalance, totalSupply);
@@ -467,11 +494,9 @@ contract AsyncVault is IERC7540, SyncVault {
      * waiting to be redeemed for the user.
      * @param owner The address of the user that requested the redeem.
      */
-    function pendingRedeemRequest(address owner)
-        external
-        view
-        returns (uint256)
-    {
+    function pendingRedeemRequest(
+        address owner
+    ) external view returns (uint256) {
         return epochs[epochId].redeemRequestBalance[owner];
     }
 
@@ -480,26 +505,23 @@ contract AsyncVault is IERC7540, SyncVault {
      * via the `claimRedeem` function.
      * @param owner The address of the user that requested the redeem.
      */
-    function claimableRedeemRequest(address owner)
-        external
-        view
-        returns (uint256)
-    {
+    function claimableRedeemRequest(
+        address owner
+    ) external view returns (uint256) {
         uint256 lastRequestId = lastRedeemRequestId[owner];
-        return isCurrentEpoch(lastRequestId)
-            ? 0
-            : epochs[lastRequestId].redeemRequestBalance[owner];
+        return
+            isCurrentEpoch(lastRequestId)
+                ? 0
+                : epochs[lastRequestId].redeemRequestBalance[owner];
     }
 
     /**
      * @dev How many assets are currently waiting to be deposited for the user.
      * @param owner The address of the user that requested the deposit.
      */
-    function pendingDepositRequest(address owner)
-        external
-        view
-        returns (uint256 assets)
-    {
+    function pendingDepositRequest(
+        address owner
+    ) external view returns (uint256 assets) {
         return epochs[epochId].depositRequestBalance[owner];
     }
 
@@ -508,15 +530,14 @@ contract AsyncVault is IERC7540, SyncVault {
      * via the `claimDeposit` function.
      * @param owner The address of the user that requested the deposit.
      */
-    function claimableDepositRequest(address owner)
-        external
-        view
-        returns (uint256 assets)
-    {
+    function claimableDepositRequest(
+        address owner
+    ) external view returns (uint256 assets) {
         uint256 lastRequestId = lastDepositRequestId[owner];
-        return isCurrentEpoch(lastRequestId)
-            ? 0
-            : epochs[lastRequestId].depositRequestBalance[owner];
+        return
+            isCurrentEpoch(lastRequestId)
+                ? 0
+                : epochs[lastRequestId].depositRequestBalance[owner];
     }
 
     /**
@@ -564,18 +585,23 @@ contract AsyncVault is IERC7540, SyncVault {
      * @param owner The address of the user that requested the deposit.
      * @param data The data to be sent to the receiver.
      */
+    /**
+     * @notice Queue a deposit request while the vault is closed.
+     * @dev Effects are applied before the external receiver callback (checks-effects-interactions).
+     */
+    /**
+     * @notice Queue a deposit request while the vault is closed.
+     * @dev Checks-effects-interactions ordering with nonReentrant. Assets are transferred
+     *      into the pending silo and request is recorded before optional receiver callback.
+     */
     function requestDeposit(
         uint256 assets,
         address receiver,
         address owner,
         bytes memory data
-    )
-        public
-        whenNotPaused
-        whenClosed
-    {
-        // vault
-        if (_msgSender() != owner) {
+    ) public whenNotPaused whenClosed nonReentrant {
+        address caller = _msgSender();
+        if (caller != owner) {
             revert ERC7540CantRequestDepositOnBehalfOf();
         }
         if (previewClaimDeposit(receiver) > 0) {
@@ -584,7 +610,9 @@ contract AsyncVault is IERC7540, SyncVault {
 
         if (assets > maxDepositRequest(owner)) {
             revert ExceededMaxDepositRequest(
-                receiver, assets, maxDepositRequest(owner)
+                receiver,
+                assets,
+                maxDepositRequest(owner)
             );
         }
 
@@ -604,18 +632,24 @@ contract AsyncVault is IERC7540, SyncVault {
      * @param owner The address of the user that requested the redeem.
      * @param data The data to be sent to the receiver.
      */
+    /**
+     * @notice Queue a redeem request while the vault is closed.
+     * @dev Spends allowance when the caller operates on behalf of `owner`.
+     */
+    /**
+     * @notice Queue a redeem request while the vault is closed.
+     * @dev If caller operates on behalf of `owner`, allowance is validated and spent.
+     *      Shares are moved to the pending silo before optional receiver callback.
+     */
     function requestRedeem(
         uint256 shares,
         address receiver,
         address owner,
         bytes memory data
-    )
-        public
-        whenNotPaused
-        whenClosed
-    {
-        if (_msgSender() != owner) {
-            _spendAllowance(owner, _msgSender(), shares);
+    ) public whenNotPaused whenClosed nonReentrant {
+        address caller = _msgSender();
+        if (caller != owner) {
+            _spendAllowance(owner, caller, shares);
         }
 
         if (previewClaimRedeem(receiver) > 0) {
@@ -624,7 +658,9 @@ contract AsyncVault is IERC7540, SyncVault {
 
         if (shares > maxRedeemRequest(owner)) {
             revert ExceededMaxRedeemRequest(
-                receiver, shares, maxRedeemRequest(owner)
+                receiver,
+                shares,
+                maxRedeemRequest(owner)
             );
         }
 
@@ -633,27 +669,24 @@ contract AsyncVault is IERC7540, SyncVault {
         _createRedeemRequest(shares, receiver, owner, data);
     }
 
-
     /**
      * @dev requestRedeemAll will create a redeem request with all the sender shares
      * available
      * @param data The data to be sent to the receiver.
      */
 
+    /**
+     * @notice Queue a redeem request for all caller's shares while the vault is closed.
+     */
     function requestRedeemAll(
         bytes memory data
-    )
-        public
-        whenNotPaused
-        whenClosed
-    {
-
+    ) public whenNotPaused whenClosed nonReentrant {
         address sender = _msgSender();
         if (previewClaimRedeem(sender) > 0) {
             _claimRedeem(sender, sender);
         }
 
-        if (previewClaimDeposit(sender)  > 0 ) {
+        if (previewClaimDeposit(sender) > 0) {
             _claimDeposit(sender, sender);
         }
 
@@ -664,18 +697,21 @@ contract AsyncVault is IERC7540, SyncVault {
         _createRedeemRequest(shares, sender, sender, data);
     }
 
-
-
     /**
      * @dev This function let users claim the shares we owe them after we
      * processed their deposit request, in the _settle function.
      * @param receiver The address of the user that requested the deposit.
      */
-    function claimDeposit(address receiver)
-        public
-        whenNotPaused
-        returns (uint256 shares)
-    {
+    /**
+     * @notice Claim minted shares owed from a previously requested deposit.
+     */
+    /**
+     * @notice Claim minted shares owed from a settled deposit request.
+     * @return shares Amount of shares transferred to the receiver.
+     */
+    function claimDeposit(
+        address receiver
+    ) public whenNotPaused nonReentrant returns (uint256 shares) {
         return _claimDeposit(_msgSender(), receiver);
     }
 
@@ -684,11 +720,16 @@ contract AsyncVault is IERC7540, SyncVault {
      * processed their redeem request, in the _settle function.
      * @param receiver The address of the user that requested the redeem.
      */
-    function claimRedeem(address receiver)
-        public
-        whenNotPaused
-        returns (uint256 assets)
-    {
+    /**
+     * @notice Claim underlying assets owed from a previously requested redeem.
+     */
+    /**
+     * @notice Claim assets owed from a settled redeem request.
+     * @return assets Amount of assets transferred to the receiver.
+     */
+    function claimRedeem(
+        address receiver
+    ) public whenNotPaused nonReentrant returns (uint256 assets) {
         return _claimRedeem(_msgSender(), receiver);
     }
 
@@ -704,9 +745,7 @@ contract AsyncVault is IERC7540, SyncVault {
         address receiver,
         bytes memory data,
         PermitParams calldata permitParams
-    )
-        public
-    {
+    ) public {
         address _msgSender = _msgSender();
         if (_asset.allowance(_msgSender, address(this)) < assets) {
             execPermit(_msgSender, address(this), permitParams);
@@ -771,11 +810,7 @@ contract AsyncVault is IERC7540, SyncVault {
     function convertToShares(
         uint256 assets,
         uint256 _epochId
-    )
-        public
-        view
-        returns (uint256)
-    {
+    ) public view returns (uint256) {
         return _convertToShares(assets, _epochId, Math.Rounding.Floor);
     }
 
@@ -789,11 +824,7 @@ contract AsyncVault is IERC7540, SyncVault {
     function convertToAssets(
         uint256 shares,
         uint256 _epochId
-    )
-        public
-        view
-        returns (uint256)
-    {
+    ) public view returns (uint256) {
         return _convertToAssets(shares, _epochId, Math.Rounding.Floor);
     }
 
@@ -813,11 +844,9 @@ contract AsyncVault is IERC7540, SyncVault {
      * @return The amount of assets the user will get if they claim their
      * deposit request.
      */
-    function claimableDepositBalanceInAsset(address owner)
-        public
-        view
-        returns (uint256)
-    {
+    function claimableDepositBalanceInAsset(
+        address owner
+    ) public view returns (uint256) {
         uint256 shares = previewClaimDeposit(owner);
         return convertToAssets(shares);
     }
@@ -836,7 +865,17 @@ contract AsyncVault is IERC7540, SyncVault {
      * from the owner.
      * @return settleValues The settle values.
      */
-    function previewSettle(uint256 newSavedBalance)
+    /**
+     * @notice Dry-run the settlement for a given end-of-epoch balance.
+     * @param newSavedBalance Strategy-reported asset balance at epoch end.
+     * @return assetsToOwner Assets to return to the owner (excess deposits vs withdrawals).
+     * @return assetsToVault Assets to collect from the owner (excess withdrawals vs deposits).
+     * @return expectedAssetFromOwner Sum of fees and shortfall to be provided by owner.
+     * @return settleValues Detailed intermediate and resulting values used by settlement.
+     */
+    function previewSettle(
+        uint256 newSavedBalance
+    )
         public
         view
         returns (
@@ -849,24 +888,34 @@ contract AsyncVault is IERC7540, SyncVault {
         uint256 _lastSavedBalance = lastSavedBalance;
         _checkMaxDrawdown(_lastSavedBalance, newSavedBalance);
 
-
         uint256 duration = block.timestamp - epochStart;
         // calculate the fees between lastSavedBalance and newSavedBalance
-        uint256 _fees1 = _computeFees(_lastSavedBalance, newSavedBalance, duration, fees1InBips);
-        uint256 _fees2 = _computeFees(_lastSavedBalance, newSavedBalance, duration, fees2InBips);
+        uint256 _fees1 = _computeFees(
+            _lastSavedBalance,
+            newSavedBalance,
+            duration,
+            fees1InBips
+        );
+        uint256 _fees2 = _computeFees(
+            _lastSavedBalance,
+            newSavedBalance,
+            duration,
+            fees2InBips
+        );
 
         uint256 totalSupply = totalSupply();
 
-
         // taking fees if positive yield
-        _lastSavedBalance = newSavedBalance - _fees1 -_fees2;
+        _lastSavedBalance = newSavedBalance - _fees1 - _fees2;
 
         address pendingSiloAddr = address(pendingSilo);
         uint256 pendingRedeem = balanceOf(pendingSiloAddr);
         uint256 pendingDeposit = _asset.balanceOf(pendingSiloAddr);
 
         uint256 sharesToMint = pendingDeposit.mulDiv(
-            totalSupply + 1, _lastSavedBalance + 1, Math.Rounding.Floor
+            totalSupply + 1,
+            _lastSavedBalance + 1,
+            Math.Rounding.Floor
         );
 
         uint256 totalAssetsSnapshot = _lastSavedBalance;
@@ -890,6 +939,10 @@ contract AsyncVault is IERC7540, SyncVault {
             totalSupplySnapshot: totalSupplySnapshot
         });
 
+        // ensure all named return values are assigned on every path
+        assetsToOwner = 0;
+        assetsToVault = 0;
+
         if (pendingDeposit > assetsToWithdraw) {
             assetsToOwner = pendingDeposit - assetsToWithdraw;
         } else if (pendingDeposit < assetsToWithdraw) {
@@ -904,9 +957,10 @@ contract AsyncVault is IERC7540, SyncVault {
      * @return True if the contract implements the interface.
      */
     function supportsInterface(bytes4 interfaceId) public pure returns (bool) {
-        return interfaceId == type(IERC165).interfaceId
-            || interfaceId == type(IERC7540Redeem).interfaceId
-            || interfaceId == type(IERC7540Deposit).interfaceId;
+        return
+            interfaceId == type(IERC165).interfaceId ||
+            interfaceId == type(IERC7540Redeem).interfaceId ||
+            interfaceId == type(IERC7540Deposit).interfaceId;
     }
 
     // transfer must happen before this function is called
@@ -917,24 +971,30 @@ contract AsyncVault is IERC7540, SyncVault {
      * @param receiver The address of the user that requested the deposit.
      * @param owner The address of the user that requested the deposit.
      */
+    /**
+     * @dev Internal: persist a deposit request and invoke optional receiver hook.
+     */
     function _createDepositRequest(
         uint256 assets,
         address receiver,
         address owner,
         bytes memory data
-    )
-        internal
-    {
+    ) internal {
         epochs[epochId].depositRequestBalance[receiver] += assets;
         if (lastDepositRequestId[receiver] != epochId) {
             lastDepositRequestId[receiver] = epochId;
         }
 
         if (
-            data.length > 0
-                && ERC7540Receiver(receiver).onERC7540DepositReceived(
-                    _msgSender(), owner, epochId, assets, data
-                ) != ERC7540Receiver.onERC7540DepositReceived.selector
+            data.length > 0 &&
+            ERC7540Receiver(receiver).onERC7540DepositReceived(
+                _msgSender(),
+                owner,
+                epochId,
+                assets,
+                data
+            ) !=
+            ERC7540Receiver.onERC7540DepositReceived.selector
         ) revert ReceiverFailed();
 
         emit DepositRequest(receiver, owner, epochId, _msgSender(), assets);
@@ -949,24 +1009,30 @@ contract AsyncVault is IERC7540, SyncVault {
      * @param data The data to be sent to the receiver.
      * @notice This function is used to update the balance of the user.
      */
+    /**
+     * @dev Internal: persist a redeem request and invoke optional receiver hook.
+     */
     function _createRedeemRequest(
         uint256 shares,
         address receiver,
         address owner,
         bytes memory data
-    )
-        internal
-    {
+    ) internal {
         epochs[epochId].redeemRequestBalance[receiver] += shares;
         if (lastRedeemRequestId[receiver] != epochId) {
             lastRedeemRequestId[receiver] = epochId;
         }
 
         if (
-            data.length > 0
-                && ERC7540Receiver(receiver).onERC7540RedeemReceived(
-                    _msgSender(), owner, epochId, shares, data
-                ) != ERC7540Receiver.onERC7540RedeemReceived.selector
+            data.length > 0 &&
+            ERC7540Receiver(receiver).onERC7540RedeemReceived(
+                _msgSender(),
+                owner,
+                epochId,
+                shares,
+                data
+            ) !=
+            ERC7540Receiver.onERC7540RedeemReceived.selector
         ) revert ReceiverFailed();
 
         emit RedeemRequest(receiver, owner, epochId, _msgSender(), shares);
@@ -978,13 +1044,13 @@ contract AsyncVault is IERC7540, SyncVault {
      * @param receiver The address of the user that requested the deposit.
      * @return shares The amount of shares requested by the user.
      */
+    /**
+     * @dev Internal: move minted shares from claimable silo to receiver for a deposit request.
+     */
     function _claimDeposit(
         address owner,
         address receiver
-    )
-        internal
-        returns (uint256 shares)
-    {
+    ) internal returns (uint256 shares) {
         uint256 lastRequestId = lastDepositRequestId[owner];
         if (lastRequestId == epochId) revert NoClaimAvailable(owner);
 
@@ -1003,14 +1069,13 @@ contract AsyncVault is IERC7540, SyncVault {
      * @param receiver The address of the user that requested the redeem.
      * @return assets The amount of assets requested by the user.
      */
+    /**
+     * @dev Internal: move assets from claimable silo to receiver for a redeem request.
+     */
     function _claimRedeem(
         address owner,
         address receiver
-    )
-        internal
-        whenNotPaused
-        returns (uint256 assets)
-    {
+    ) internal whenNotPaused returns (uint256 assets) {
         uint256 lastRequestId = lastRedeemRequestId[owner];
         if (lastRequestId == epochId) revert NoClaimAvailable(owner);
 
@@ -1029,10 +1094,16 @@ contract AsyncVault is IERC7540, SyncVault {
      * @return lastSavedBalance The last saved balance.
      * @return totalSupply The total supply.
      */
-    function _settle(uint256 newSavedBalance)
-        internal
-        returns (uint256, uint256)
-    {
+    /**
+     * @dev Internal: finalize an epoch by netting deposits and redemptions, charging fees,
+     *      updating snapshots and advancing `epochId`.
+     * @param newSavedBalance Strategy-reported balance at end of epoch.
+     * @return lastSavedBalance New last saved balance post-settlement.
+     * @return totalSupply Current total supply after settlement.
+     */
+    function _settle(
+        uint256 newSavedBalance
+    ) internal returns (uint256, uint256) {
         (
             uint256 assetsToOwner,
             uint256 assetsToVault,
@@ -1061,7 +1132,9 @@ contract AsyncVault is IERC7540, SyncVault {
         // either there are more deposits than withdrawals
         if (settleValues.pendingDeposit > settleValues.assetsToWithdraw) {
             _asset.safeTransferFrom(
-                address(pendingSilo), owner(), assetsToOwner
+                address(pendingSilo),
+                owner(),
+                assetsToOwner
             );
             if (settleValues.assetsToWithdraw > 0) {
                 _asset.safeTransferFrom(
@@ -1070,10 +1143,13 @@ contract AsyncVault is IERC7540, SyncVault {
                     settleValues.assetsToWithdraw
                 );
             }
-        } else if (settleValues.pendingDeposit < settleValues.assetsToWithdraw)
-        {
+        } else if (
+            settleValues.pendingDeposit < settleValues.assetsToWithdraw
+        ) {
             _asset.safeTransferFrom(
-                owner(), address(claimableSilo), assetsToVault
+                owner(),
+                address(claimableSilo),
+                assetsToVault
             );
             if (settleValues.pendingDeposit > 0) {
                 _asset.safeTransferFrom(
@@ -1107,15 +1183,16 @@ contract AsyncVault is IERC7540, SyncVault {
             settleValues.pendingRedeem
         );
 
-        settleValues.lastSavedBalance = settleValues.lastSavedBalance
-            - settleValues.fees1 - settleValues.fees2 + settleValues.pendingDeposit
-            - settleValues.assetsToWithdraw;
+        settleValues.lastSavedBalance =
+            settleValues.lastSavedBalance -
+            settleValues.fees1 -
+            settleValues.fees2 +
+            settleValues.pendingDeposit -
+            settleValues.assetsToWithdraw;
         lastSavedBalance = settleValues.lastSavedBalance;
 
-        epochs[epochId].totalSupplySnapshot =
-            settleValues.totalSupplySnapshot;
-        epochs[epochId].totalAssetsSnapshot =
-            settleValues.totalAssetsSnapshot;
+        epochs[epochId].totalSupplySnapshot = settleValues.totalSupplySnapshot;
+        epochs[epochId].totalAssetsSnapshot = settleValues.totalAssetsSnapshot;
 
         epochId++;
 
@@ -1137,15 +1214,14 @@ contract AsyncVault is IERC7540, SyncVault {
      * @param requestId The id of the request.
      * @param rounding The rounding type.
      */
+    /**
+     * @dev Internal: convert assets into shares relative to a request's epoch snapshot.
+     */
     function _convertToShares(
         uint256 assets,
         uint256 requestId,
         Math.Rounding rounding
-    )
-        internal
-        view
-        returns (uint256)
-    {
+    ) internal view returns (uint256) {
         if (isCurrentEpoch(requestId)) return 0;
 
         uint256 totalAssets = epochs[requestId].totalAssetsSnapshot + 1;
@@ -1161,15 +1237,14 @@ contract AsyncVault is IERC7540, SyncVault {
      * @param requestId The id of the request.
      * @param rounding The rounding type.
      */
+    /**
+     * @dev Internal: convert shares into assets relative to a request's epoch snapshot.
+     */
     function _convertToAssets(
         uint256 shares,
         uint256 requestId,
         Math.Rounding rounding
-    )
-        internal
-        view
-        returns (uint256)
-    {
+    ) internal view returns (uint256) {
         if (isCurrentEpoch(requestId)) return 0;
 
         uint256 totalSupply = epochs[requestId].totalSupplySnapshot + 1;
@@ -1183,36 +1258,41 @@ contract AsyncVault is IERC7540, SyncVault {
      * @param _lastSavedBalance The last saved balance.
      * @param newSavedBalance The new saved balance.
      */
+    /**
+     * @dev Internal: enforce a maximum drawdown between consecutive epochs.
+     */
     function _checkMaxDrawdown(
         uint256 _lastSavedBalance,
         uint256 newSavedBalance
-    )
-        internal
-        view
-    {
+    ) internal view {
         if (
-            newSavedBalance
-                < _lastSavedBalance.mulDiv(
-                    BPS_DIVIDER - _maxDrawdown, BPS_DIVIDER, Math.Rounding.Ceil
-                )
+            newSavedBalance <
+            _lastSavedBalance.mulDiv(
+                BPS_DIVIDER - _maxDrawdown,
+                BPS_DIVIDER,
+                Math.Rounding.Ceil
+            )
         ) revert MaxDrawdownReached();
     }
 
-
     // compute fees
     // the tvl is averaged during the period
+    /**
+     * @dev Internal: compute fees for an epoch using average TVL over `duration`.
+     *      fees = average(balance) * duration/YEAR * annualBips
+     */
     function _computeFees(
         uint256 _lastSavedBalance,
         uint256 newSavedBalance,
         uint256 duration,
         uint256 annualBips
-    )
-        public
-        pure
-        returns (uint256 fees)
-    {
+    ) public pure returns (uint256 fees) {
         uint256 avg = (newSavedBalance + _lastSavedBalance) / 2;
-        uint256 annualized = (avg).mulDiv(duration , YEAR, Math.Rounding.Floor);
-        fees = (annualized).mulDiv(annualBips, BPS_DIVIDER, Math.Rounding.Floor);
+        uint256 annualized = (avg).mulDiv(duration, YEAR, Math.Rounding.Floor);
+        fees = (annualized).mulDiv(
+            annualBips,
+            BPS_DIVIDER,
+            Math.Rounding.Floor
+        );
     }
 }

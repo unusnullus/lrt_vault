@@ -3,7 +3,7 @@
 src = "src"
 out = "out"
 libs = ["lib"]
-solc = "0.8.21"
+solc = "0.8.30"
 remappings = [
     # "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
     "forge-std/=lib/forge-std/src/",
@@ -22,7 +22,7 @@ extra_output = ["storageLayout"]
 src = 'src'
 out = 'out'
 libs = ['lib']
-solc = "0.8.21"
+solc = "0.8.30"
 # eth-rpc-url = "https://eth-mainnet.g.alchemy.com/v2/"
 optimizer-runs = 10_000_000
 
@@ -30,7 +30,7 @@ optimizer-runs = 10_000_000
 src = 'src'
 out = 'out'
 libs = ['lib']
-solc = "0.8.19"
+solc = "0.8.30"
 # ffi = true
 optimizer-runs = 10_000_000
 

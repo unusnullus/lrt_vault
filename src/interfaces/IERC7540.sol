@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-pragma solidity 0.8.21;
+pragma solidity ^0.8.30;
 
-import { IERC4626 } from "@openzeppelin/contracts/interfaces/IERC4626.sol";
+import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 
 /**
  * @dev Interface of the ERC165 standard, as defined in the
@@ -20,10 +20,7 @@ interface IERC165 {
      *
      * This function call must use less than 30 000 gas.
      */
-    function supportsInterface(bytes4 interfaceId)
-        external
-        view
-        returns (bool);
+    function supportsInterface(bytes4 interfaceId) external view returns (bool);
 }
 
 interface IERC7540Deposit {
@@ -51,8 +48,7 @@ interface IERC7540Deposit {
         address receiver,
         address owner,
         bytes memory data
-    )
-        external;
+    ) external;
 
     /**
      * @dev Returns the amount of requested assets in Pending state for the
@@ -63,10 +59,9 @@ interface IERC7540Deposit {
      * - MUST NOT revert unless due to integer overflow caused by an
      * unreasonably large input.
      */
-    function pendingDepositRequest(address owner)
-        external
-        view
-        returns (uint256 assets);
+    function pendingDepositRequest(
+        address owner
+    ) external view returns (uint256 assets);
 }
 
 interface IERC7540Redeem {
@@ -92,8 +87,7 @@ interface IERC7540Redeem {
         address operator,
         address owner,
         bytes memory data
-    )
-        external;
+    ) external;
 
     /**
      * @dev Returns the amount of requested shares in Pending state for the
@@ -104,10 +98,9 @@ interface IERC7540Redeem {
      * - MUST NOT revert unless due to integer overflow caused by an
      * unreasonably large input.
      */
-    function pendingRedeemRequest(address owner)
-        external
-        view
-        returns (uint256 shares);
+    function pendingRedeemRequest(
+        address owner
+    ) external view returns (uint256 shares);
 }
 
 /**
@@ -116,4 +109,6 @@ interface IERC7540Redeem {
  * defined in
  *         https://github.com/ethereum/EIPs/blob/2e63f2096b0c7d8388458bb0a03a7ce0eb3422a4/EIPS/eip-7540.md[ERC-7540].
  */
-interface IERC7540 is IERC7540Deposit, IERC7540Redeem, IERC4626, IERC165 { }
+interface IERC7540 is IERC7540Deposit, IERC7540Redeem, IERC4626, IERC165 {
+
+}

@@ -1,5 +1,5 @@
 //SPDX-License-Identifier: MIT
-pragma solidity 0.8.21;
+pragma solidity ^0.8.21;
 
 import {Ownable2StepUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
 import {IERC7540, IERC165, IERC7540Redeem, IERC7540Deposit} from "./interfaces/IERC7540.sol";
@@ -279,7 +279,7 @@ contract LRTVault is
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
-         _disableInitializers();
+        _disableInitializers();
     }
 
     function initialize(
@@ -290,7 +290,7 @@ contract LRTVault is
         uint256 bootstrapAmount,
         string memory name,
         string memory symbol,
-		bool withBootstrap
+        bool withBootstrap
     ) public initializer {
         epochId = 1;
         vaultIsOpen = true;
@@ -301,9 +301,9 @@ contract LRTVault is
         __Ownable_init(_owner);
         __ERC20Permit_init(name);
         __ERC20Pausable_init();
-		if (withBootstrap ) {
-			deposit(bootstrapAmount, _owner);
-		}
+        if (withBootstrap) {
+            deposit(bootstrapAmount, _owner);
+        }
         setTreasury(_treasury);
         setFees(_fees);
         _min_rate = 9_000_000; //90%
@@ -734,7 +734,7 @@ contract LRTVault is
         // calculate the fees between lastSavedBalance and newSavedBalance
         uint256 _fees = _computeFees(supply, duration, feesInBips);
 
-		redeemRatio =  _computeRealRate(epochRate, _fees, supply);
+        redeemRatio = _computeRealRate(epochRate, _fees, supply);
 
         address pendingSiloAddr = address(pendingSilo);
         uint256 pendingRedeem = balanceOf(pendingSiloAddr);
@@ -898,12 +898,13 @@ contract LRTVault is
         uint256 _fees,
         uint256 _supply
     ) public pure returns (uint256) {
-        uint256 numerator = (_supply).mulDiv(_epochRate,
+        uint256 numerator = (_supply).mulDiv(
+            _epochRate,
             RATE_DIVIDER,
             Math.Rounding.Floor
         );
-		numerator = (numerator - _fees)*RATE_DIVIDER;
-		return numerator/(_supply);
+        numerator = (numerator - _fees) * RATE_DIVIDER;
+        return numerator / (_supply);
     }
 
     /**
