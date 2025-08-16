@@ -1,4 +1,4 @@
-## Asynchronous Amphor vaults
+## Asynchronous vaults
 
 **This repository implements the ERC-7540 standard, it should so be considered as a draft since the standard is still in review state.**
 
@@ -18,22 +18,22 @@ An ERC-7540-inspired asynchronous vault system built on top of an ERC-4626-like 
 ### High-level flow
 
 ```mermaid
-flowchart TD
-    A[Open Vault] -->|Owner closes| B[Closed Vault]
-    B -->|Users queue deposits| C[Pending Silo (assets)]
-    B -->|Users queue redeems| D[Pending Silo (shares)]
-    C -->|previewSettle| E{Net inflow or outflow?}
-    D -->|previewSettle| E
-    E -->|assets to owner| F[Owner receives surplus]
-    E -->|assets to vault| G[Owner supplies shortfall]
-    E --> H[Compute fees1 & fees2]
-    H --> I[Mint shares to Claimable Silo]
-    H --> J[Burn pending shares]
-    I --> K[Users claim shares]
-    J --> L[Users claim assets]
-    K --> M[Open Vault]
-    L --> M
-    M -->|Next epoch| A
+flowchart TD;
+    A["Open Vault"] -->|Owner closes| B["Closed Vault"];
+    B -->|Users queue deposits| C["Pending Silo assets"];
+    B -->|Users queue redeems| D["Pending Silo shares"];
+    C -->|previewSettle| E{"Net inflow or outflow?"};
+    D -->|previewSettle| E;
+    E -->|assets to owner| F["Owner receives surplus"];
+    E -->|assets to vault| G["Owner supplies shortfall"];
+    E --> H["Compute fees1 & fees2"];
+    H --> I["Mint shares to Claimable Silo"];
+    H --> J["Burn pending shares"];
+    I --> K["Users claim shares"];
+    J --> L["Users claim assets"];
+    K --> M["Open Vault"];
+    L --> M;
+    M -->|Next epoch| A;
 ```
 
 ### Contracts and roles
