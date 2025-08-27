@@ -4,7 +4,7 @@ pragma solidity ^0.8.30;
 import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC7540, IERC4626} from "./interfaces/IERC7540.sol";
 import {PermitParams, AsyncVault} from "./AsyncVault.sol";
 import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
@@ -205,7 +205,7 @@ contract VaultZapper is Ownable2Step, Pausable, ReentrancyGuard {
      * @dev The `toggleVaultAuthorization` function is used to toggle the
      * authorization of a vault.
      */
-    function toggleVaultAuthorization(IERC7540 vault) public onlyOwner {
+    function toggleVaultAuthorization(IERC4626 vault) public onlyOwner {
         bool authorized = !authorizedVaults[vault];
         IERC20(vault.asset()).forceApprove(
             address(vault),
